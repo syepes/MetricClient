@@ -7,6 +7,11 @@ import static ch.qos.logback.classic.Level.*
 import org.codehaus.groovy.runtime.StackTraceUtils
 import groovy.time.*
 
+import groovy.transform.WithReadLock
+import groovy.transform.WithWriteLock
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import java.util.concurrent.locks.ReadWriteLock
+
 import net.razorvine.pickle.*
 
 
@@ -16,8 +21,11 @@ class MetricClient {
   int graphite_port
   int socketTimeOut = 10000
 
-  private LinkedList mBuffer = []
-  private LinkedList mBufferPickle = []
+  private final ReadWriteLock mBufferLock = new ReentrantReadWriteLock()
+  private final ReadWriteLock mBufferPickleLock = new ReentrantReadWriteLock()
+
+  private final LinkedList mBuffer = []
+  private final LinkedList mBufferPickle = []
 
   MetricClient(String graphite_host = 'localhost', int graphite_port = 2003, String protocol = 'tcp', String prefix = null) {
     this.graphite_host = graphite_host
@@ -38,6 +46,59 @@ class MetricClient {
   }
 
 
+  @WithReadLock('mBufferLock')
+  LinkedList getBuffer() {
+    mBuffer
+  }
+  @WithReadLock('mBufferLock')
+  int getBufferSize() {
+    mBuffer?.size()
+  }
+  @WithWriteLock('mBufferLock')
+  String pollBufferItem() {
+    mBuffer.poll()
+  }
+  @WithWriteLock('mBufferLock')
+  void addBufferItem(String item) {
+    mBuffer << item
+  }
+  @WithWriteLock('mBufferLock')
+  void addBufferItems(ArrayList items) {
+    mBuffer.addAll(items)
+  }
+  @WithWriteLock('mBufferLock')
+  void clearBuffer() {
+    mBuffer.clear()
+  }
+
+
+  @WithReadLock('mBufferPickleLock')
+  LinkedList getBufferPickle() {
+    mBufferPickle
+  }
+  @WithReadLock('mBufferPickleLock')
+  int getBufferPickleSize() {
+    mBufferPickle?.size()
+  }
+  @WithWriteLock('mBufferPickleLock')
+  byte[] pollBufferPickleItem() {
+    mBufferPickle.poll()
+  }
+  @WithWriteLock('mBufferPickleLock')
+  void addBufferPickleItem(byte[] item) {
+    mBufferPickle << item
+  }
+  @WithWriteLock('mBufferPickleLock')
+  void addBufferPickleItems(ArrayList items) {
+    mBufferPickle.addAll(items)
+  }
+  @WithWriteLock('mBufferPickleLock')
+  void clearBufferPickle() {
+    mBufferPickle.clear()
+  }
+
+
+
   /**
    * Send metrics using Text format to the Graphite server
    *
@@ -53,7 +114,7 @@ class MetricClient {
     log.debug "Sending Metrics to Graphite (${graphite_host}:${graphite_port}) using '${protocol}' (useBuffer: ${useBuffer})"
 
     try {
-      if (protocol == 'tcp'){
+      if (protocol == 'tcp') {
         socket = new Socket(graphite_host, graphite_port)
         socket.setSoTimeout(socketTimeOut)
       } else {
@@ -66,20 +127,20 @@ class MetricClient {
       log.error "Socket exception: ${getStackTrace(e)}"
 
       if (useBuffer) {
-        mBuffer.addAll(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
-        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${mBuffer.size()})"
+        addBufferItems(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
+        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${getBufferSize()})"
       }
 
       return
     }
 
     // Send buffered metrics first
-    if(mBuffer && useBuffer) {
-      log.info "Sending ${mBuffer.size()} Buffered Metrics"
+    if(getBufferSize() && useBuffer) {
+      log.info "Sending ${getBufferSize()} Buffered Metrics"
 
-      while (mBuffer.size() > 0) {
-        String msg = mBuffer.poll()
-        log.trace "Metric: ${msg} (mBuffer: ${mBuffer.size()})"
+      while (getBufferSize() > 0) {
+        String msg = pollBufferItem()
+        log.trace "Metric: ${msg} (mBuffer: ${getBufferSize()})"
 
         try {
           if (protocol == 'tcp') {
@@ -98,8 +159,8 @@ class MetricClient {
           StackTraceUtils.deepSanitize(e)
           log.warn "Sending Buffered Metric: ${getStackTrace(e)}"
 
-          mBuffer << msg
-          log.warn "Buffered Metric added to the Buffer (mBuffer: ${mBuffer.size()})"
+          addBufferItem(msg)
+          log.warn "Buffered Metric added to the Buffer (mBuffer: ${getBufferSize()})"
         }
       }
     }
@@ -126,8 +187,8 @@ class MetricClient {
         log.warn "Sending Metric: ${getStackTrace(e)}"
 
         if (useBuffer) {
-          mBuffer << msg
-          log.warn "Metric added to the Buffer (mBuffer: ${mBuffer.size()})"
+          addBufferItem(msg)
+          log.warn "Metric added to the Buffer (mBuffer: ${getBufferSize()})"
         }
       }
     }
@@ -135,7 +196,7 @@ class MetricClient {
     socket?.close()
 
     Date timeEnd = new Date()
-    log.info "Finished sending ${sentCount} Metrics (mBuffer: ${mBuffer.size()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
+    log.info "Finished sending ${sentCount} Metrics (mBuffer: ${getBufferSize()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
   }
 
 
@@ -165,21 +226,21 @@ class MetricClient {
       log.error "Socket exception: ${getStackTrace(e)}"
 
       if (useBuffer) {
-        mBuffer.addAll(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
-        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${mBuffer.size()})"
+        addBufferItems(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
+        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${getBufferSize()})"
       }
 
       return
     }
 
     // Send buffered metrics first
-    if(mBuffer && useBuffer) {
-      log.info "Sending ${mBuffer?.size()} Buffered Metrics"
+    if(getBufferSize() && useBuffer) {
+      log.info "Sending ${getBufferSize()} Buffered Metrics"
 
       try {
-        log.info "Generating Pickle Packages for ${mBuffer?.size()} Buffered Metrics"
-        pickleBufferPkgs = generatePicklerPkgs(mBuffer.toList())
-        mBuffer = []
+        log.info "Generating Pickle Packages for ${getBufferSize()} Buffered Metrics"
+        pickleBufferPkgs = generatePicklerPkgs(getBuffer().toList())
+        clearBuffer()
 
       } catch(Exception e) {
         StackTraceUtils.deepSanitize(e)
@@ -199,20 +260,20 @@ class MetricClient {
           StackTraceUtils.deepSanitize(e)
           log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
 
-          mBufferPickle << pkg
-          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${mBufferPickle.size()})"
+          addBufferPickleItem(pkg)
+          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${getBufferPickleSize()})"
         }
       }
     }
 
     // Send Buffered Pickler Package Metrics first
-    if (mBufferPickle && useBuffer) {
-      log.info "Sending ${mBufferPickle?.size()} Buffered Pickle Package Metrics"
+    if (getBufferPickleSize() && useBuffer) {
+      log.info "Sending ${getBufferPickleSize()} Buffered Pickle Package Metrics"
 
       // Send metrics
-      while (mBufferPickle.size() > 0) {
-        byte[] pkg = mBufferPickle.poll()
-        log.trace "Metric: ${pkg} (mBufferPickle: ${mBufferPickle.size()})"
+      while (getBufferPickleSize() > 0) {
+        byte[] pkg = pollBufferPickleItem()
+        log.trace "Metric: ${pkg} (mBufferPickle: ${getBufferPickleSize()})"
 
         try {
           DataOutputStream dOut = new DataOutputStream(socket?.getOutputStream())
@@ -225,8 +286,8 @@ class MetricClient {
           StackTraceUtils.deepSanitize(e)
           log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
 
-          mBufferPickle << pkg
-          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${mBufferPickle.size()})"
+          addBufferPickleItem(pkg)
+          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${getBufferPickleSize()})"
         }
       }
     }
@@ -241,8 +302,8 @@ class MetricClient {
       log.error "Generating Pickle: ${getStackTrace(e)}"
 
       if (useBuffer) {
-        mBuffer.addAll(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
-        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${mBuffer.size()})"
+        addBufferItems(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
+        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${getBufferSize()})"
       }
     }
 
@@ -260,15 +321,15 @@ class MetricClient {
         log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
 
         if (useBuffer) {
-          mBufferPickle << pkg
-          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${mBufferPickle.size()})"
+          addBufferPickleItem(pkg)
+          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${getBufferPickleSize()})"
         }
       }
     }
     socket?.close()
 
     Date timeEnd = new Date()
-    log.info "Finished sending ${sentCount} Metric Pickler Packages (mBuffer: ${mBuffer.size()} / mBufferPickle: ${mBufferPickle.size()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
+    log.info "Finished sending ${sentCount} Metric Pickler Packages (mBuffer: ${getBufferSize()} / mBufferPickle: ${getBufferPickleSize()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
   }
 
 
