@@ -1,151 +1,314 @@
 package com.allthingsmonitoring.utils
 
+import org.slf4j.*
+import groovy.util.logging.Slf4j
+import ch.qos.logback.classic.*
+import static ch.qos.logback.classic.Level.*
+import org.codehaus.groovy.runtime.StackTraceUtils
+import groovy.time.*
+
+import net.razorvine.pickle.*
+
+
+@Slf4j
 class MetricClient {
-  def prefix, host, port, inetAddr, protocol
-  def socket
-  Random RNG = new Random()
-  final int sendTimeOut = 1000 // block for no more than 1 seconds
+  String graphite_host, protocol, prefix
+  int graphite_port
+  int socketTimeOut = 10000
 
-  MetricClient( String prefix = null, String host = 'localhost', int port = 8125, String protocol = 'udp') {
+  private LinkedList mBuffer = []
+  private LinkedList mBufferPickle = []
+
+  MetricClient(String graphite_host = 'localhost', int graphite_port = 2003, String protocol = 'tcp', String prefix = null) {
+    this.graphite_host = graphite_host
+    this.graphite_port = graphite_port
+    this.protocol = protocol?.toLowerCase()
     this.prefix = prefix
-    this.host = host
-    this.port = port
-    this.protocol = protocol
-    this.inetAddr = InetAddress.getByName( this.host )
-    if (protocol == 'udp'){
-      this.socket = new DatagramSocket()
-      this.socket.setSoTimeout(sendTimeOut)
-    } else if (protocol == 'tcp'){
-      this.socket = new Socket(this.host, this.port)
-      this.socket.setSoTimeout(sendTimeOut)
-    }
   }
 
-  /**
-   * gauges
-   *
-   * @param metrics String or list of strings of metric names
-   * @param time time to log in ms
-   * @param samplerate a double specifying a sample rate, default = 1 (100%)
-   */
-  void gauge( metrics, time, sampleRate = 1 ) {
-    def _stats = [metrics].flatten()
-    sendStats( _stats.collect { String.format("%s:%d|g", it, time) }, sampleRate )
+
+  // Gets the StackTrace and returns a string
+  String getStackTrace(Throwable t) {
+    StringWriter sw = new StringWriter()
+    PrintWriter pw = new PrintWriter(sw, true)
+    t.printStackTrace(pw)
+    pw.flush()
+    sw.flush()
+    return sw.toString()
   }
 
 
   /**
-   * timer
+   * Send metrics using Text format to the Graphite server
    *
-   * @param metric String or list of metric names
-   * @param c Closure that will be execute and its execution time will be used as the timer
+   * @param metrics List of metric strings
    */
-  void timer(metric, Closure c){
-     Date timeStart = new Date()
-     c.call()
-     Date timeEnd = new Date()
-     timing(metric,(timeEnd.time - timeStart.time))
-  }
+  void send2Graphite(ArrayList metrics, Boolean useBuffer=true) {
+    if (!metrics) { return }
 
-  /**
-   * timing
-   *
-   * @param metrics String or list of strings of metric names
-   * @param time time to log in ms
-   * @param samplerate a double specifying a sample rate, default = 1 (100%)
-   */
-  void timing( metrics, time, sampleRate = 1 ) {
-    def _stats = [metrics].flatten()
-    sendStats( _stats.collect { String.format("%s:%d|ms", it, time) }, sampleRate )
-  }
+    Date timeStart = new Date()
+    int sentCount = 0
+    def socket
 
-  /**
-   * incr/decr
-   *
-   * @param metrics String or list of strings of metric names
-   * @param delta Increment step
-   * @param samplerate a double specifying a sample rate, default = 1 (100%)
-   */
-  void incr( metrics, delta = 1 , sampleRate = 1 ) { updateCounter( metrics, delta, sampleRate ) }
-  void decr( metrics, delta = -1, sampleRate = 1 ) { updateCounter( metrics, delta, sampleRate ) }
+    log.debug "Sending Metrics to Graphite (${graphite_host}:${graphite_port}) using '${protocol}' (useBuffer: ${useBuffer})"
 
-  void updateCounter( metrics, delta = 1, sampleRate = 1 ) {
-    def _stats = [metrics].flatten()
-    sendStats( _stats.collect { "${it}:${delta}|c" }, sampleRate )
-  }
-
-
-
-  /**
-   * Graphite
-   *
-   * @param data a string or array of strings
-   * @param ts Add to the metric the specified Epoch  
-   */
-  void graphite( data, long ts = 0 ) {
-    def _data = [data].flatten()
-
-    if (ts) {
-      ArrayList dataWithTS = []
-      _data.each { d ->
-        dataWithTS << String.format("%s %d", d, ts)
+    try {
+      if (protocol == 'tcp'){
+        socket = new Socket(graphite_host, graphite_port)
+        socket.setSoTimeout(socketTimeOut)
+      } else {
+        socket = new DatagramSocket()
+        socket.setSoTimeout(socketTimeOut)
       }
-      _data = dataWithTS
+
+    } catch (Exception e) {
+      StackTraceUtils.deepSanitize(e)
+      log.error "Socket exception: ${getStackTrace(e)}"
+
+      if (useBuffer) {
+        mBuffer.addAll(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
+        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${mBuffer.size()})"
+      }
+
+      return
     }
-    doSend( _data )
-  }
 
+    // Send buffered metrics first
+    if(mBuffer && useBuffer) {
+      log.info "Sending ${mBuffer.size()} Buffered Metrics"
 
-  /**
-   * sendStats
-   *
-   * @param data a string or array of strings
-   * @param samplerate a double specifying a sample rate, default = 1 (100%)
-   */
-  private void sendStats( data, sampleRate = 1 ) {
-    def _data = [data].flatten()
+      while (mBuffer.size() > 0) {
+        String msg = mBuffer.poll()
+        log.trace "Metric: ${msg} (mBuffer: ${mBuffer.size()})"
 
-    if (sampleRate < 1.0) {
-      ArrayList sampledData = []
-      _data.each { d ->
-        if (RNG.nextDouble() <= sampleRate) {
-          //sampledData.add( String.format("%s|@%f", d, sampleRate) )
-          sampledData << String.format("%s|@%f", d, sampleRate)
+        try {
+          if (protocol == 'tcp') {
+            Writer writer = new OutputStreamWriter(socket?.getOutputStream())
+            writer.write(msg)
+            writer.flush()
+          } else {
+            byte[] bytes = msg.getBytes()
+            InetAddress addr = InetAddress.getByName(graphite_host)
+            DatagramPacket packet = new DatagramPacket(bytes, bytes.length, addr, graphite_port)
+            socket?.send(packet)
+          }
+          sentCount++
+
+        } catch(Exception e) {
+          StackTraceUtils.deepSanitize(e)
+          log.warn "Sending Buffered Metric: ${getStackTrace(e)}"
+
+          mBuffer << msg
+          log.warn "Buffered Metric added to the Buffer (mBuffer: ${mBuffer.size()})"
         }
       }
-      _data = sampledData
     }
-    doSend( _data )
+
+    log.info "Sending ${metrics?.size()} Metrics"
+    metrics.each { String it ->
+      String msg = prefix ? "${prefix}.${it}" : it
+
+      try {
+        if (protocol == 'tcp') {
+          Writer writer = new OutputStreamWriter(socket?.getOutputStream())
+          writer.write(msg)
+          writer.flush()
+        } else {
+          byte[] bytes = msg.getBytes()
+          InetAddress addr = InetAddress.getByName(graphite_host)
+          DatagramPacket packet = new DatagramPacket(bytes, bytes.length, addr, graphite_port)
+          socket?.send(packet)
+        }
+        sentCount++
+
+      } catch(Exception e) {
+        StackTraceUtils.deepSanitize(e)
+        log.warn "Sending Metric: ${getStackTrace(e)}"
+
+        if (useBuffer) {
+          mBuffer << msg
+          log.warn "Metric added to the Buffer (mBuffer: ${mBuffer.size()})"
+        }
+      }
+    }
+
+    socket?.close()
+
+    Date timeEnd = new Date()
+    log.info "Finished sending ${sentCount} Metrics (mBuffer: ${mBuffer.size()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
   }
 
+
+
   /**
-   * doSend
+   * Send metrics using Pickle format to the Graphite server
    *
-   * @param data a string or array of strings that will be sent to statsd
+   * @param metrics List of metric strings
    */
-  private void doSend( data ) {
-    def _data = [data].flatten()
-    if(this.protocol?.toLowerCase() == 'tcp'){
-      _data.each { d ->
-        StringBuilder msg = new StringBuilder()
+  void send2GraphitePickle(ArrayList metrics, Boolean useBuffer=true) {
+    if (!metrics) { return }
 
-        if (this.prefix){ msg << this.prefix +'.'+ d }else{ msg << d }
-        msg << '\n'
+    Date timeStart = new Date()
+    int sentCount = 0
+    Socket socket
+    ArrayList picklePkgs = []
+    ArrayList pickleBufferPkgs = []
 
-        Writer writer = new OutputStreamWriter(this.socket.getOutputStream())
-        writer.write(msg.toString())
-        writer.flush()
+    log.debug "Sending Metrics to Graphite (${graphite_host}:${graphite_port}) using 'tcp' (useBuffer: ${useBuffer})"
+
+    try {
+      socket = new Socket(graphite_host, graphite_port)
+      socket.setSoTimeout(socketTimeOut)
+
+    } catch (Exception e) {
+      StackTraceUtils.deepSanitize(e)
+      log.error "Socket exception: ${getStackTrace(e)}"
+
+      if (useBuffer) {
+        mBuffer.addAll(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
+        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${mBuffer.size()})"
       }
-    } else {
-      _data.each { d ->
-        StringBuilder msg = new StringBuilder()
 
-        if (this.prefix){ msg << this.prefix +'.'+ d }else{ msg << d }
-        msg << '\n'
+      return
+    }
 
-        byte[] bytes = msg.toString().getBytes()
-        this.socket.send( new DatagramPacket(bytes, bytes.length, this.inetAddr, this.port) )
+    // Send buffered metrics first
+    if(mBuffer && useBuffer) {
+      log.info "Sending ${mBuffer?.size()} Buffered Metrics"
+
+      try {
+        log.info "Generating Pickle Packages for ${mBuffer?.size()} Buffered Metrics"
+        pickleBufferPkgs = generatePicklerPkgs(mBuffer.toList())
+        mBuffer = []
+
+      } catch(Exception e) {
+        StackTraceUtils.deepSanitize(e)
+        log.error "Generating Pickle: ${getStackTrace(e)}"
+      }
+
+      // Send metrics
+      pickleBufferPkgs.each { byte[] pkg ->
+        try {
+          DataOutputStream dOut = new DataOutputStream(socket?.getOutputStream())
+          dOut.writeInt(pkg.size())
+          dOut.write(pkg)
+          dOut.flush()
+          sentCount++
+
+        } catch(Exception e) {
+          StackTraceUtils.deepSanitize(e)
+          log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
+
+          mBufferPickle << pkg
+          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${mBufferPickle.size()})"
+        }
       }
     }
+
+    // Send Buffered Pickler Package Metrics first
+    if (mBufferPickle && useBuffer) {
+      log.info "Sending ${mBufferPickle?.size()} Buffered Pickle Package Metrics"
+
+      // Send metrics
+      while (mBufferPickle.size() > 0) {
+        byte[] pkg = mBufferPickle.poll()
+        log.trace "Metric: ${pkg} (mBufferPickle: ${mBufferPickle.size()})"
+
+        try {
+          DataOutputStream dOut = new DataOutputStream(socket?.getOutputStream())
+          dOut.writeInt(pkg.size())
+          dOut.write(pkg)
+          dOut.flush()
+          sentCount++
+
+        } catch(Exception e) {
+          StackTraceUtils.deepSanitize(e)
+          log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
+
+          mBufferPickle << pkg
+          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${mBufferPickle.size()})"
+        }
+      }
+    }
+
+
+    try {
+      log.info "Generating Pickle Packages for ${metrics?.size()} Metrics"
+      picklePkgs = prefix ? generatePicklerPkgs(metrics.collect { "${prefix}.${it}" }) : generatePicklerPkgs(metrics)
+
+    } catch(Exception e) {
+      StackTraceUtils.deepSanitize(e)
+      log.error "Generating Pickle: ${getStackTrace(e)}"
+
+      if (useBuffer) {
+        mBuffer.addAll(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
+        log.warn "Added ${metrics?.size()} Metrics in the Buffer (mBuffer: ${mBuffer.size()})"
+      }
+    }
+
+    // Send metrics
+    picklePkgs.each { byte[] pkg ->
+      try {
+        DataOutputStream dOut = new DataOutputStream(socket?.getOutputStream())
+        dOut.writeInt(pkg.size())
+        dOut.write(pkg)
+        dOut.flush()
+        sentCount++
+
+      } catch(Exception e) {
+        StackTraceUtils.deepSanitize(e)
+        log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
+
+        if (useBuffer) {
+          mBufferPickle << pkg
+          log.warn "Metric added to the PickleBuffer (mBufferPickle: ${mBufferPickle.size()})"
+        }
+      }
+    }
+    socket?.close()
+
+    Date timeEnd = new Date()
+    log.info "Finished sending ${sentCount} Metric Pickler Packages (mBuffer: ${mBuffer.size()} / mBufferPickle: ${mBufferPickle.size()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
+  }
+
+
+  /*
+   * Generate a list of Pickler packages that not reache Carbon maxLength 1048576:Bytes = 1:MB
+   *
+   */
+  ArrayList generatePicklerPkgs(ArrayList metrics, long maxLength=972800) {
+    if (!metrics) { return [] }
+
+    Date timeStart = new Date()
+    Pickler p = new Pickler(false)
+    ArrayList dataTemp = []
+    ArrayList pkgs = []
+
+    int mCount = 0
+    metrics.each { String m ->
+      ArrayList a = m.tokenize()
+      dataTemp << [a[0], [a[2]?.toLong(), a[1]?.toFloat()] ] // Metric TS Val
+
+      // TODO: Fix this durty workaround and find a faster way of prechecking the pkg size
+      if (mCount >= 400) {
+        mCount = 0
+        byte[] pkg = p.dumps(dataTemp)
+        // Verify that the MaxLength is not reached
+        if (pkg?.size() >= maxLength) {
+          log.debug "Reached Pickler Package MaxLength: ${pkg?.size()}"
+          pkgs << pkg
+          dataTemp = []
+        }
+      }
+      mCount++
+    }
+
+    byte[] pkg = p.dumps(dataTemp)
+    pkgs << pkg
+    log.debug "Pickler Smallest Package: ${pkg?.size()}"
+
+    Date timeEnd = new Date()
+    log.info "Created ${pkgs?.size()} Pickler Packages for ${metrics?.size()} Metrics in ${TimeCategory.minus(timeEnd, timeStart)}"
+    return pkgs
   }
 }

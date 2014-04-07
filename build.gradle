@@ -6,7 +6,7 @@ description = "$projectName - Graphite and StatD client"
 group = 'com.allthingsmonitoring.utils.MetricClient' // Class name
 archivesBaseName = 'metricclient'
 distsDirName = 'dist'
-version = '1.0'
+version = '1.1'
 
 def authorString = 'Sebastian YEPES FERNANDEZ (syepes@gmail.com)'
 def copyrightString = 'Copyright &#169; 2014 &#8211; Sebastian YEPES FERNANDEZ All Rights Reserved.'
@@ -31,7 +31,7 @@ compileJava {
     options.encoding = 'UTF-8'
     sourceCompatibility = 1.7
     targetCompatibility = 1.7
-}
+}MSSQL
 
 repositories {
   mavenLocal()
@@ -40,14 +40,15 @@ repositories {
 }
 
 dependencies {
-  compile 'org.codehaus.groovy:groovy:2.+',
-          'org.codehaus.groovy:groovy-test:2.+',
+  compile 'org.codehaus.groovy:groovy:2.2.+',
+          'org.slf4j:slf4j-api:1.+',
+          'ch.qos.logback:logback-core:1.+',
+          'ch.qos.logback:logback-classic:1.+',
           fileTree(dir: 'libs', include: '*.jar')
 
-  testCompile 'junit:junit:4.+'
-  //testCompile "org.spockframework:spock-core:0.7-groovy-2.0", {
-  //  exclude module: "groovy-all"
-  //}
+  testCompile 'org.spockframework:spock-core:0.7-groovy-2.0', {
+    exclude module: "groovy-all"
+  }
 }
 
 
@@ -77,6 +78,13 @@ processResources{
 }
 
 jar {
+  from ( configurations.compile.collect { it.isDirectory() ? it : zipTree(it) } ) {
+    include 'com/allthingsmonitoring/**'
+    include 'net/razorvine/**'
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+  }
   manifest {
     attributes 'Implementation-Title': project.description,
                'Implementation-Version': project.version,
