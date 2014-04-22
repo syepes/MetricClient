@@ -19,7 +19,8 @@ import net.razorvine.pickle.*
 class MetricClient {
   String graphite_host, protocol, prefix
   int graphite_port
-  int socketTimeOut = 10000
+  final int socketTimeOut = 10000
+  final int maxTries = 2
 
   private final ReadWriteLock mBufferLock = new ReentrantReadWriteLock()
   private final ReadWriteLock mBufferPickleLock = new ReentrantReadWriteLock()
@@ -124,7 +125,8 @@ class MetricClient {
 
     } catch (Exception e) {
       StackTraceUtils.deepSanitize(e)
-      log.error "Socket exception: ${getStackTrace(e)}"
+      log.error "Socket exception: ${e?.message}"
+      log.debug "Socket exception: ${getStackTrace(e)}"
 
       if (useBuffer) {
         addBufferItems(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
@@ -135,10 +137,12 @@ class MetricClient {
     }
 
     // Send buffered metrics first
-    if(getBufferSize() && useBuffer) {
+    if (getBufferSize() && useBuffer) {
       log.info "Sending ${getBufferSize()} Buffered Metrics"
+      int sendTries = 0
 
-      while (getBufferSize() > 0) {
+      // Send metrics
+      while (getBufferSize() > 0 && sendTries <= maxTries) {
         String msg = pollBufferItem()
         log.trace "Metric: ${msg} (mBuffer: ${getBufferSize()})"
 
@@ -157,10 +161,16 @@ class MetricClient {
 
         } catch(Exception e) {
           StackTraceUtils.deepSanitize(e)
-          log.warn "Sending Buffered Metric: ${getStackTrace(e)}"
+          log.warn "Sending Buffered Metric: ${e?.message}"
+          log.debug "Sending Buffered Metric: ${getStackTrace(e)}"
 
+          sendTries++
           addBufferItem(msg)
           log.warn "Buffered Metric added to the Buffer (mBuffer: ${getBufferSize()})"
+        }
+
+        if (sendTries >= maxTries) {
+          log.error "Sending Buffered Metric reached its maximum retries (${sendTries} >= ${maxTries})"
         }
       }
     }
@@ -184,7 +194,8 @@ class MetricClient {
 
       } catch(Exception e) {
         StackTraceUtils.deepSanitize(e)
-        log.warn "Sending Metric: ${getStackTrace(e)}"
+        log.warn "Sending Metric: ${e?.message}"
+        log.debug "Sending Metric: ${getStackTrace(e)}"
 
         if (useBuffer) {
           addBufferItem(msg)
@@ -223,7 +234,8 @@ class MetricClient {
 
     } catch (Exception e) {
       StackTraceUtils.deepSanitize(e)
-      log.error "Socket exception: ${getStackTrace(e)}"
+      log.error "Socket exception: ${e?.message}"
+      log.debug "Socket exception: ${getStackTrace(e)}"
 
       if (useBuffer) {
         addBufferItems(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
@@ -234,7 +246,7 @@ class MetricClient {
     }
 
     // Send buffered metrics first
-    if(getBufferSize() && useBuffer) {
+    if (getBufferSize() && useBuffer) {
       log.info "Sending ${getBufferSize()} Buffered Metrics"
 
       try {
@@ -244,7 +256,8 @@ class MetricClient {
 
       } catch(Exception e) {
         StackTraceUtils.deepSanitize(e)
-        log.error "Generating Pickle: ${getStackTrace(e)}"
+        log.error "Generating Pickle: ${e?.message}"
+        log.debug "Generating Pickle: ${getStackTrace(e)}"
       }
 
       // Send metrics
@@ -258,7 +271,8 @@ class MetricClient {
 
         } catch(Exception e) {
           StackTraceUtils.deepSanitize(e)
-          log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
+          log.warn "Sending Metric (Pickle): ${e?.message}"
+          log.debug "Sending Metric (Pickle): ${getStackTrace(e)}"
 
           addBufferPickleItem(pkg)
           log.warn "Metric added to the PickleBuffer (mBufferPickle: ${getBufferPickleSize()})"
@@ -269,9 +283,10 @@ class MetricClient {
     // Send Buffered Pickler Package Metrics first
     if (getBufferPickleSize() && useBuffer) {
       log.info "Sending ${getBufferPickleSize()} Buffered Pickle Package Metrics"
+      int sendTries = 0
 
       // Send metrics
-      while (getBufferPickleSize() > 0) {
+      while (getBufferPickleSize() > 0 && sendTries <= maxTries) {
         byte[] pkg = pollBufferPickleItem()
         log.trace "Metric: ${pkg} (mBufferPickle: ${getBufferPickleSize()})"
 
@@ -284,10 +299,16 @@ class MetricClient {
 
         } catch(Exception e) {
           StackTraceUtils.deepSanitize(e)
-          log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
+          log.warn "Sending Metric (Pickle): ${e?.message}"
+          log.debug "Sending Metric (Pickle): ${getStackTrace(e)}"
 
+          sendTries++
           addBufferPickleItem(pkg)
           log.warn "Metric added to the PickleBuffer (mBufferPickle: ${getBufferPickleSize()})"
+        }
+
+        if (sendTries >= maxTries) {
+          log.error "Sending Buffered Metric (Pickle) reached its maximum retries (${sendTries} >= ${maxTries})"
         }
       }
     }
@@ -299,7 +320,8 @@ class MetricClient {
 
     } catch(Exception e) {
       StackTraceUtils.deepSanitize(e)
-      log.error "Generating Pickle: ${getStackTrace(e)}"
+      log.error "Generating Pickle: ${e?.message}"
+      log.debug "Generating Pickle: ${getStackTrace(e)}"
 
       if (useBuffer) {
         addBufferItems(prefix ? metrics.collect { "${prefix}.${it}" } : metrics)
@@ -318,7 +340,8 @@ class MetricClient {
 
       } catch(Exception e) {
         StackTraceUtils.deepSanitize(e)
-        log.warn "Sending Metric (Pickle): ${getStackTrace(e)}"
+        log.warn "Sending Metric (Pickle): ${e?.message}"
+        log.debug "Sending Metric (Pickle): ${getStackTrace(e)}"
 
         if (useBuffer) {
           addBufferPickleItem(pkg)
