@@ -175,6 +175,7 @@ class MetricClient {
       }
     }
 
+    // Send metrics
     log.info "Sending ${metrics?.size()} Metrics"
     metrics.each { String it ->
       String msg = prefix ? "${prefix}.${it}" : it
@@ -330,6 +331,8 @@ class MetricClient {
     }
 
     // Send metrics
+    log.info "Sending ${picklePkgs.size()} Metric Pickler Packages (mBuffer: ${getBufferSize()} / mBufferPickle: ${getBufferPickleSize()}) to Graphite"
+
     picklePkgs.each { byte[] pkg ->
       try {
         DataOutputStream dOut = new DataOutputStream(socket?.getOutputStream())

@@ -24,6 +24,8 @@ configure([compileGroovy, compileTestGroovy]) {
   groovyOptions.fork(memoryInitialSize: '128M', memoryMaximumSize: '1G')
   groovyOptions.encoding = 'UTF-8'
   //groovyOptions.optimizationOptions.indy = true
+  sourceCompatibility = 1.7
+  targetCompatibility = 1.7
 }
 
 //configurations.compile.transitive = false
@@ -40,7 +42,7 @@ repositories {
 }
 
 dependencies {
-  compile 'org.codehaus.groovy:groovy:2.2.+',
+  compile 'org.codehaus.groovy:groovy:2.+',
           'org.slf4j:slf4j-api:1.+',
           'ch.qos.logback:logback-core:1.+',
           'ch.qos.logback:logback-classic:1.+',
