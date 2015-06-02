@@ -146,7 +146,7 @@ class MetricClient {
 
     // Send buffered metrics first
     if (getBufferSize() && useBuffer) {
-      log.info "Sending ${getBufferSize()} Buffered Metrics"
+      log.info "Sending ${getBufferSize()} Graphite Buffered Metrics"
       int sendTries = 0
 
       // Send metrics
@@ -184,9 +184,10 @@ class MetricClient {
     }
 
     // Send metrics
-    log.info "Sending ${metrics?.size()} Metrics"
+    log.info "Sending ${metrics?.size()} Graphite Metrics"
     metrics.each { String it ->
       String msg = prefix ? "${prefix}.${it}" : it
+      log.trace "Metric: ${msg}"
 
       try {
         if (protocol == 'tcp') {
@@ -257,7 +258,7 @@ class MetricClient {
 
     // Send buffered metrics first
     if (getBufferSize() && useBuffer) {
-      log.info "Sending ${getBufferSize()} Buffered Metrics"
+      log.info "Sending ${getBufferSize()} Graphite Buffered Metrics"
 
       try {
         log.info "Generating Pickle Packages for ${getBufferSize()} Buffered Metrics"
@@ -292,7 +293,7 @@ class MetricClient {
 
     // Send Buffered Pickler Package Metrics first
     if (getBufferPickleSize() && useBuffer) {
-      log.info "Sending ${getBufferPickleSize()} Buffered Pickle Package Metrics"
+      log.info "Sending ${getBufferPickleSize()} Graphite Buffered Pickle Package Metrics"
       int sendTries = 0
 
       // Send metrics
@@ -340,9 +341,11 @@ class MetricClient {
     }
 
     // Send metrics
-    log.info "Sending ${picklePkgs.size()} Metric Pickler Packages (mBuffer: ${getBufferSize()} / mBufferPickle: ${getBufferPickleSize()}) to Graphite"
+    log.info "Sending ${picklePkgs.size()} Graphite Metric Pickler Packages (mBuffer: ${getBufferSize()} / mBufferPickle: ${getBufferPickleSize()})"
 
     picklePkgs.each { byte[] pkg ->
+      log.trace "Metric: ${pkg}"
+
       try {
         DataOutputStream dOut = new DataOutputStream(socket?.getOutputStream())
         dOut.writeInt(pkg.size())
@@ -503,22 +506,22 @@ class MetricClient {
 
       Integer responseCode = con?.getResponseCode()
       if (responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
-        log.info "Sent InfluxDB Metric ${compression ? 'Compressed ' : ''}(${responseCode})"
+        log.debug "Sent InfluxDB Metric ${compression ? 'Compressed ' : ''}(${responseCode})"
 
         // Ignore Response content
         con.getInputStream().close()
       } else {
         BufferedReader br = new BufferedReader(new InputStreamReader(con?.getErrorStream()))
-        log.error "Sending InfluxDB Metric to '${url}' (${responseCode}:'${con.getResponseMessage()}') - ${br?.readLine()}"
+        String error = "'${url}' (${responseCode}:'${con.getResponseMessage()}') - ${br?.readLine()}"
         br?.close()
-        throw new Exception("Sending InfluxDB Metric to '${url}'")
+        throw new Exception("${error}")
       }
 
     } catch(Exception e) {
       StackTraceUtils.deepSanitize(e)
       log.error "Sending InfluxDB Metric: ${e?.message}"
       log.debug "Sending InfluxDB Metric: ${getStackTrace(e)}"
-      throw new Exception("Sending InfluxDB Metric")
+      throw new Exception('Failed')
     }
   }
 
@@ -530,13 +533,21 @@ class MetricClient {
    *
    * @return byte[] Compressed string
    */
-  private byte[] string2gzip(String s) throws Exception {
+  private byte[] string2gzip(String s) {
     ByteArrayOutputStream bos = new ByteArrayOutputStream()
-    GZIPOutputStream gzip = new GZIPOutputStream(bos)
-    OutputStreamWriter osw = new OutputStreamWriter(gzip, 'UTF-8')
-    osw.write(s)
-    osw.close()
-    return bos.toByteArray()
+    OutputStreamWriter osw
+
+    try {
+      GZIPOutputStream gzip = new GZIPOutputStream(bos)
+      osw = new OutputStreamWriter(gzip, 'UTF-8')
+      osw.write(s)
+    } catch(Exception e) {
+      throw new Exception('Failed to GZIP String')
+    } finally {
+      osw.close()
+    }
+
+    return bos?.toByteArray()
   }
 
 
@@ -580,7 +591,7 @@ class MetricClient {
 
     // Send buffered metrics first
     if (getBufferSize() && useBuffer) {
-      log.info "Sending ${getBufferSize()} Buffered Metrics"
+      log.info "Sending ${getBufferSize()} InfluxDB Buffered Metrics"
       int sendTries = 0
 
       // Send metrics
@@ -615,8 +626,9 @@ class MetricClient {
     }
 
     // Send metrics
-    log.info "Sending ${metrics?.size()} Metrics"
+    log.info "Sending ${metrics?.size()} InfluxDB Metrics"
     metrics.each { String msg ->
+      log.trace "Metric: ${msg}"
 
       try {
         if (protocol == 'http-compression') {
