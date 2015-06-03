@@ -425,14 +425,15 @@ class MetricClient {
   Boolean pingInfluxDB() {
     Boolean status = false
     String basicAuth,response
+    HttpURLConnection con
 
     try {
       if (server_auth?.contains(':')) {
         basicAuth = "${server_auth?.split(':')?.getAt(0)}:${server_auth?.split(':')?.getAt(1)}".getBytes().encodeBase64().toString()
       }
 
-      URL url = new URL("http://${server_host}:${server_port}/messaging/ping")
-      HttpURLConnection con = url.openConnection()
+      URL url = new URL("http://${server_host}:${server_port}/ping")
+      con = url.openConnection()
       con.setRequestProperty('Accept', 'application/json; charset=UTF-8')
       con.setRequestProperty('User-Agent', 'MetricClient')
       if (basicAuth) {
@@ -445,9 +446,9 @@ class MetricClient {
       con.allowUserInteraction = false
 
       con.connect()
-      if (con.responseCode == HttpURLConnection.HTTP_OK) {
-        response = con?.responseMessage?.trim()
-        if (response =~ /(?i).*OK.*/){ status = true }
+      if (con.responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
+        // TODO: Improve the ping check when the new ping handler is completed
+        status = true
       } else { status = false }
 
     } catch(Exception e) {
@@ -468,11 +469,13 @@ class MetricClient {
   /**
    * Write InfluxDB data using the HTTP API
    *
-   * @param json String with the plain InfluxDB JSON Post
+   * @param data String with the content that should be written to InfluxDB
+   * @param parms HashMap URL params sent to the HTTP endpoint
+   * @param apiType String indicating the API protocol (line or json)
    * @param compression Boolean Toggle to enable HTTP compression
    */
-  private void writeInfluxDB(String json, Boolean compression=true) {
-    if (!json) { return }
+  private void writeInfluxDB(String data, HashMap parms=[:], String apiType='line', Boolean compression=true) {
+    if (!data) { return }
     String basicAuth
 
     try {
@@ -480,13 +483,20 @@ class MetricClient {
         basicAuth = "${server_auth?.split(':')?.getAt(0)}:${server_auth?.split(':')?.getAt(1)}".getBytes().encodeBase64().toString()
       }
 
-      URL url = new URL("http://${server_host}:${server_port}/write")
+      String server_url = "http://${server_host}:${server_port}/write" + (parms ? '?'+ parms.collect { it }.join('&') : '')
+      URL url = new URL(server_url)
       HttpURLConnection con = url.openConnection()
+
       if (basicAuth) {
         con.setRequestProperty('Authorization', "Basic ${basicAuth}")
       }
-      con.setRequestProperty('Content-type', 'application/json; charset=UTF-8')
-      con.setRequestProperty('Accept', 'application/json; charset=UTF-8')
+
+      if (apiType?.toLowerCase() == 'line') {
+        con.setRequestProperty('Content-type', 'text/plain; charset=UTF-8')
+      } else if (apiType?.toLowerCase() == 'json') {
+        con.setRequestProperty('Content-type', 'application/json; charset=UTF-8')
+      }
+      con.setRequestProperty('Accept', '*/*')
       con.setRequestProperty('User-Agent', 'MetricClient')
       con.setRequestMethod('POST')
       con.doOutput = true
@@ -497,10 +507,10 @@ class MetricClient {
 
       if (compression) {
         con.setRequestProperty('Content-Encoding', 'gzip')
-        con.getOutputStream().write( string2gzip(json) )
+        con.getOutputStream().write( string2gzip(data) )
       } else {
         OutputStreamWriter osw = new OutputStreamWriter(con.getOutputStream(), 'UTF-8')
-        osw.write(json)
+        osw.write(data)
         osw.close()
       }
 
@@ -554,16 +564,30 @@ class MetricClient {
   /**
    * Send metrics using the InfluxDB HTTP API
    *
-   * @param metrics List of metric (json) strings
+   * @param metrics String metric in json or line format
+   * @param parms HashMap URL params sent to the HTTP endpoint
+   * @param apiType String indicating the API protocol (line or json)
    * @param useBuffer Boolean Toggle to enable Buffering of failures
    */
-  void send2InfluxDB(ArrayList metrics, Boolean useBuffer=true) {
+  void send2InfluxDB(String metrics, HashMap parms=[:], String apiType='line', Boolean useBuffer=true) {
+    send2InfluxDB([metrics] as ArrayList, parms, apiType, useBuffer)
+  }
+
+  /**
+   * Send metrics using the InfluxDB HTTP API
+   *
+   * @param metrics List of metrics in json or line format
+   * @param parms HashMap URL params sent to the HTTP endpoint
+   * @param apiType String indicating the API protocol (line or json)
+   * @param useBuffer Boolean Toggle to enable Buffering of failures
+   */
+  void send2InfluxDB(ArrayList metrics, HashMap parms=[:], String apiType='line', Boolean useBuffer=true) {
     if (!metrics) { return }
 
     Date timeStart = new Date()
     int sentCount = 0
 
-    log.debug "Sending Metrics to InfluxDB (${server_host}:${server_port}) using '${protocol}' (useBuffer: ${useBuffer})"
+    log.debug "Sending Metrics to InfluxDB (${server_host}:${server_port}) using '${protocol}' format: ${apiType} (useBuffer: ${useBuffer})"
 
     try {
       // Buffer if InfluxDB is not available
@@ -601,9 +625,9 @@ class MetricClient {
 
         try {
           if (protocol == 'http-compression') {
-            writeInfluxDB(msg)
+            writeInfluxDB(msg, parms, apiType)
           } else if (protocol == 'http') {
-            writeInfluxDB(msg, false)
+            writeInfluxDB(msg, parms, apiType, false)
           } else {
             log.error "Unknown InfluxDB protocol: ${protocol}"
           }
@@ -632,9 +656,9 @@ class MetricClient {
 
       try {
         if (protocol == 'http-compression') {
-          writeInfluxDB(msg)
+          writeInfluxDB(msg, parms, apiType)
         } else if (protocol == 'http') {
-          writeInfluxDB(msg, false)
+          writeInfluxDB(msg, parms, apiType, false)
         } else {
           log.error "Unknown InfluxDB protocol: ${protocol}"
         }
