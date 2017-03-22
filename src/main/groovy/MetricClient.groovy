@@ -26,7 +26,7 @@ class MetricClient {
   final int socketTimeOut = 10000 // ms
   final int http_readTimeout = 30000 // ms
   final int http_connectTimeout = 5000 // ms
-  final int maxTries = 2
+  final int maxTries = 60
 
   private final ReadWriteLock mBufferLock = new ReentrantReadWriteLock()
   private final ReadWriteLock mBufferPickleLock = new ReentrantReadWriteLock()
@@ -492,9 +492,9 @@ class MetricClient {
       }
 
       if (apiType?.toLowerCase() == 'line') {
-        con.setRequestProperty('Content-type', 'text/plain; charset=UTF-8')
+        con.setRequestProperty('Content-Type', 'text/plain; charset=UTF-8')
       } else if (apiType?.toLowerCase() == 'json') {
-        con.setRequestProperty('Content-type', 'application/json; charset=UTF-8')
+        con.setRequestProperty('Content-Type', 'application/json; charset=UTF-8')
       }
       con.setRequestProperty('Accept', '*/*')
       con.setRequestProperty('User-Agent', 'MetricClient')
