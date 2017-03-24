@@ -1,3 +1,6 @@
+# 1.3.2 (2017-03-24)
+- Remove jars from build
+
 # 1.3.1 (2017-03-22)
 - Options connectTimeout and maxTries
 - Move to Gradle shadowJar
