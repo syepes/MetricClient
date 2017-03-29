@@ -1,3 +1,6 @@
+# [Unreleased]
+ - Fix InfluxDB response / header
+ 
 # 1.3.2 (2017-03-24)
 - Remove jars from build
 

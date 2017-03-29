@@ -446,6 +446,8 @@ class MetricClient {
       con.allowUserInteraction = false
 
       con.connect()
+      response = con?.responseMessage?.trim()
+
       if (con.responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
         // TODO: Improve the ping check when the new ping handler is completed
         status = true
@@ -453,14 +455,14 @@ class MetricClient {
 
     } catch(Exception e) {
       StackTraceUtils.deepSanitize(e)
-      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} (${response}) ${con?.getHeaderField('X-Influxdb-Version')?: ''} : ${e?.message}"
+      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} (${response}) ${con?.getHeaderField('X-InfluxDB-Version')?: ''} : ${e?.message}"
       log.debug "Ping InfluxDB: ${getStackTrace(e)}"
     }
 
     if (status) {
       log.info "Ping InfluxDB: ${status ? 'OK' : 'Failed'}"
     } else {
-      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} (${response}) ${con?.getHeaderField('X-Influxdb-Version')?: ''}"
+      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} (${response}) ${con?.getHeaderField('X-InfluxDB-Version')?: ''}"
     }
     return status
   }
