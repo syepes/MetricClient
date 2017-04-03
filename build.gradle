@@ -21,7 +21,7 @@ description = "$projectName - Graphite and InfluxDB client"
 group = 'com.allthingsmonitoring.utils.MetricClient'
 archivesBaseName = 'metricclient'
 distsDirName = 'dist'
-version = '1.3.2'
+version = '1.3.5'
 
 def authorString = 'Sebastian YEPES FERNANDEZ (syepes@gmail.com)'
 def copyrightString = 'Copyright &#169; 2017 &#8211; Sebastian YEPES FERNANDEZ All Rights Reserved.'
