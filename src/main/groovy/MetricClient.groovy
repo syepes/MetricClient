@@ -22,11 +22,7 @@ import net.razorvine.pickle.*
 @Slf4j
 class MetricClient {
   String server_host, server_auth, protocol, prefix
-  int server_port
-  final int socketTimeOut = 10000 // ms
-  final int http_readTimeout = 30000 // ms
-  final int http_connectTimeout = 5000 // ms
-  final int maxTries = 60
+  int server_port,socketTimeOut,http_connectTimeout,http_readTimeout,maxTries
 
   private final ReadWriteLock mBufferLock = new ReentrantReadWriteLock()
   private final ReadWriteLock mBufferPickleLock = new ReentrantReadWriteLock()
@@ -34,11 +30,20 @@ class MetricClient {
   private final LinkedList mBuffer = []
   private final LinkedList mBufferPickle = []
 
-  MetricClient(String server_host = 'localhost', int server_port = 2003, String protocol = 'tcp', String prefix = null, String server_auth = '') {
+
+  MetricClient(String server_host, int server_port, String protocol, String prefix, String server_auth) {
+     MetricClient(server_host, server_port, protocol, [socket_timeout_ms: 10000, http_connect_timeout_ms: 5000, http_read_timeout_ms: 30000, max_tries: 60], prefix, server_auth)
+  }
+
+  MetricClient(String server_host = 'localhost', int server_port = 2003, String protocol = 'tcp', LinkedHashMap parms = [socket_timeout_ms: 10000, http_connect_timeout_ms: 5000, http_read_timeout_ms: 30000, max_tries: 60], String prefix = null, String server_auth = '') {
     this.server_host = server_host
     this.server_port = server_port
     this.server_auth = server_auth
     this.protocol = protocol?.toLowerCase()
+    this.socketTimeOut = parms?.socket_timeout_ms
+    this.http_connectTimeout = parms?.http_connect_timeout_ms
+    this.http_readTimeout = parms?.http_read_timeout_ms
+    this.maxTries = parms?.max_tries
     this.prefix = prefix
   }
 
@@ -216,8 +221,7 @@ class MetricClient {
 
     socket?.close()
 
-    Date timeEnd = new Date()
-    log.info "Finished sending ${sentCount} Metrics (mBuffer: ${getBufferSize()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
+    log.info "Finished sending ${sentCount} Metrics (mBuffer: ${getBufferSize()}) to Graphite in ${TimeCategory.minus(new Date(), timeStart)}"
   }
 
 
@@ -366,8 +370,7 @@ class MetricClient {
     }
     socket?.close()
 
-    Date timeEnd = new Date()
-    log.info "Finished sending ${sentCount} Metric Pickler Packages (mBuffer: ${getBufferSize()} / mBufferPickle: ${getBufferPickleSize()}) to Graphite in ${TimeCategory.minus(timeEnd, timeStart)}"
+    log.info "Finished sending ${sentCount} Metric Pickler Packages (mBuffer: ${getBufferSize()} / mBufferPickle: ${getBufferPickleSize()}) to Graphite in ${TimeCategory.minus(new Date(), timeStart)}"
   }
 
 
@@ -398,7 +401,7 @@ class MetricClient {
         byte[] pkg = p.dumps(dataTemp)
         // Verify that the MaxLength is not reached
         if (pkg?.size() >= maxLength) {
-          log.debug "Reached Pickler Package MaxLength: ${pkg?.size()}"
+          log.trace "Reached Pickler Package MaxLength: ${pkg?.size()}"
           pkgs << pkg
           dataTemp = []
         }
@@ -408,10 +411,9 @@ class MetricClient {
 
     byte[] pkg = p.dumps(dataTemp)
     pkgs << pkg
-    log.debug "Pickler Smallest Package: ${pkg?.size()}"
+    log.trace "Pickler Smallest Package: ${pkg?.size()}"
 
-    Date timeEnd = new Date()
-    log.info "Created ${pkgs?.size()} Pickler Packages for ${metrics?.size()} Metrics in ${TimeCategory.minus(timeEnd, timeStart)}"
+    log.info "Created ${pkgs?.size()} Pickler Packages for ${metrics?.size()} Metrics in ${TimeCategory.minus(new Date(), timeStart)}"
     return pkgs
   }
 
@@ -424,7 +426,9 @@ class MetricClient {
    */
   Boolean pingInfluxDB() {
     Boolean status = false
-    String basicAuth,response
+    String basicAuth
+    String response
+    String version
     HttpURLConnection con
 
     try {
@@ -446,23 +450,24 @@ class MetricClient {
       con.allowUserInteraction = false
 
       con.connect()
-      response = con?.responseMessage?.trim()
+      response = con?.getResponseMessage()?.trim()
+      version = con?.getHeaderField('X-InfluxDB-Version') ?: ''
 
-      if (con.responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
+      if (con?.responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
         // TODO: Improve the ping check when the new ping handler is completed
         status = true
       } else { status = false }
 
     } catch(Exception e) {
       StackTraceUtils.deepSanitize(e)
-      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} (${response}) ${con?.getHeaderField('X-InfluxDB-Version')?: ''} : ${e?.message}"
+      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} ${version} (${response}) : ${e?.message}"
       log.debug "Ping InfluxDB: ${getStackTrace(e)}"
     }
 
     if (status) {
-      log.info "Ping InfluxDB: ${status ? 'OK' : 'Failed'}"
+      log.info "Ping InfluxDB: ${status ? 'OK' : 'Failed'} ${version}"
     } else {
-      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} (${response}) ${con?.getHeaderField('X-InfluxDB-Version')?: ''}"
+      log.error "Ping InfluxDB: ${status ? 'OK' : 'Failed'} ${version} (${response})"
     }
     return status
   }
@@ -524,7 +529,7 @@ class MetricClient {
         con.getInputStream().close()
       } else {
         BufferedReader br = new BufferedReader(new InputStreamReader(con?.getErrorStream()))
-        String error = "'${url}' (${responseCode}:'${con.getResponseMessage()}') - ${br?.readLine()}"
+        String error = "'${url}' (${con?.getHeaderField('X-InfluxDB-Version')} : ${responseCode} : ${con?.getResponseMessage()?.trim()}) - ${br?.readLine()}"
         br?.close()
         throw new Exception("${error}")
       }
@@ -678,7 +683,6 @@ class MetricClient {
       }
     }
 
-    Date timeEnd = new Date()
-    log.info "Finished sending ${sentCount} Metrics (mBuffer: ${getBufferSize()}) to InfluxDB in ${TimeCategory.minus(timeEnd, timeStart)}"
+    log.info "Finished sending ${sentCount} Metrics (mBuffer: ${getBufferSize()}) to InfluxDB in ${TimeCategory.minus(new Date(), timeStart)}"
   }
 }
