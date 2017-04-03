@@ -31,20 +31,34 @@ class MetricClient {
   private final LinkedList mBufferPickle = []
 
 
-  MetricClient(String server_host, int server_port, String protocol, String prefix, String server_auth) {
-     MetricClient(server_host, server_port, protocol, [socket_timeout_ms: 10000, http_connect_timeout_ms: 5000, http_read_timeout_ms: 30000, max_tries: 60], prefix, server_auth)
+  // Graphite
+  MetricClient(String server_host, int server_port, String protocol, String prefix) {
+     MetricClient(server_host, server_port, protocol, [socket_timeout_ms: 10000, http_connect_timeout_ms: 5000, http_read_timeout_ms: 30000, max_tries: 60], prefix, '')
+  }
+
+  MetricClient(String server_host, int server_port, String protocol, LinkedHashMap parms, String prefix) {
+     MetricClient(server_host, server_port, protocol, parms, prefix, '')
+  }
+
+  // InfluxDB
+  MetricClient(String server_host, int server_port, String protocol, String server_auth) {
+     MetricClient(server_host, server_port, protocol, [socket_timeout_ms: 10000, http_connect_timeout_ms: 5000, http_read_timeout_ms: 30000, max_tries: 60], null, server_auth)
+  }
+
+  MetricClient(String server_host, int server_port, String protocol, LinkedHashMap parms, String server_auth) {
+     MetricClient(server_host, server_port, protocol, parms, null, server_auth)
   }
 
   MetricClient(String server_host = 'localhost', int server_port = 2003, String protocol = 'tcp', LinkedHashMap parms = [socket_timeout_ms: 10000, http_connect_timeout_ms: 5000, http_read_timeout_ms: 30000, max_tries: 60], String prefix = null, String server_auth = '') {
     this.server_host = server_host
     this.server_port = server_port
-    this.server_auth = server_auth
     this.protocol = protocol?.toLowerCase()
-    this.socketTimeOut = parms?.socket_timeout_ms
-    this.http_connectTimeout = parms?.http_connect_timeout_ms
-    this.http_readTimeout = parms?.http_read_timeout_ms
-    this.maxTries = parms?.max_tries
     this.prefix = prefix
+    this.socketTimeOut = parms?.socket_timeout_ms ?: 10000
+    this.http_connectTimeout = parms?.http_connect_timeout_ms ?: 5000
+    this.http_readTimeout = parms?.http_read_timeout_ms ?: 30000
+    this.maxTries = parms?.max_tries ?: 60
+    this.server_auth = server_auth
   }
 
 
