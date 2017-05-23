@@ -4,7 +4,7 @@ buildscript {
   }
   dependencies {
     classpath 'org.kordamp.gradle:stats-gradle-plugin:0.2.+',
-              'com.github.jengelman.gradle.plugins:shadow:1.+'
+              'com.github.jengelman.gradle.plugins:shadow:2.+'
   }
 }
 
@@ -12,7 +12,7 @@ plugins {
   id "org.kordamp.gradle.stats" version "0.2.0"
   id 'groovy'
   id 'distribution'
-  id 'com.github.johnrengelman.shadow' version '1.2.4'
+  id 'com.github.johnrengelman.shadow' version '2.0.0'
 }
 
 def projectName = 'MetricClient'
@@ -57,7 +57,7 @@ repositories {
 
 dependencies {
   compile 'org.codehaus.groovy:groovy:2.+',
-          'org.slf4j:slf4j-api:1.+',
+          'org.slf4j:slf4j-api:1.7.+',
           'ch.qos.logback:logback-core:1.+',
           'ch.qos.logback:logback-classic:1.+',
           'net.razorvine:pyrolite:4.+',
