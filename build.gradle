@@ -9,10 +9,10 @@ buildscript {
 }
 
 plugins {
-  id "org.kordamp.gradle.stats" version "0.2.0"
   id 'groovy'
   id 'distribution'
-  id 'com.github.johnrengelman.shadow' version '2.0.0'
+  id 'com.github.johnrengelman.shadow' version '2.0.3'
+  id "org.kordamp.gradle.stats" version "0.2.2"
 }
 
 def projectName = 'MetricClient'
@@ -27,6 +27,7 @@ def authorString = 'Sebastian YEPES FERNANDEZ (syepes@gmail.com)'
 def copyrightString = 'Copyright &#169; 2017 &#8211; Sebastian YEPES FERNANDEZ All Rights Reserved.'
 
 defaultTasks 'clean','shadowJar','groovydoc','distZip'
+//defaultTasks 'clean','shadowJar','distZip'
 
 configurations {
   groovyDoc
@@ -56,15 +57,16 @@ repositories {
 }
 
 dependencies {
-  compile 'org.codehaus.groovy:groovy:2.+',
+  compile 'org.codehaus.groovy:groovy:2.4.+',
           'org.slf4j:slf4j-api:1.7.+',
-          'ch.qos.logback:logback-core:1.+',
-          'ch.qos.logback:logback-classic:1.+',
+          'ch.qos.logback:logback-core:1.2.+',
+          'ch.qos.logback:logback-classic:1.2.+',
           'net.razorvine:pyrolite:4.+',
           fileTree(dir: 'libs', include: '*.jar')
 
-  groovyDoc 'org.codehaus.groovy:groovy-groovydoc:2.+',
-            'org.codehaus.groovy:groovy-ant:2.+'
+groovyDoc 'org.codehaus.groovy:groovy-groovydoc:2.4.+',
+          'org.codehaus.groovy:groovy-json:2.4.+',
+          'org.codehaus.groovy:groovy-ant:2.4.+'
 
   testCompile 'org.spockframework:spock-core:1.0-groovy-2.4', {
     exclude module: 'groovy-all'
@@ -73,6 +75,7 @@ dependencies {
 
 
 groovydoc {
+  classpath -= configurations.groovyDoc
   groovyClasspath = configurations.groovyDoc
   destinationDir  = new File(( System.getProperty( 'groovydocDir' ) ?: project.buildDir.path + '/docs' ), ( project.version.contains( '-SNAPSHOT' ) ? '' : project.version ))
   includePrivate = true
